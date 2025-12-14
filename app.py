@@ -185,3 +185,32 @@ def perpetual_loop():
 if __name__ == "__main__":
     print("🔥 Perpetual Mathematical Intelligence Engine Starting 🔥")
     perpetual_loop()
+
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
+
+# Dummy HTTP handler
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Unified Intelligence Engine Running!")
+
+# Start server in a separate thread
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 10000))  # Render sets PORT automatically
+    server = HTTPServer(("0.0.0.0", port), DummyHandler)
+    print(f"Dummy web server running on port {port}")
+    server.serve_forever()
+
+threading.Thread(target=run_dummy_server, daemon=True).start()
+
+# Start your perpetual engine
+if __name__ == "__main__":
+    handleStart()  # Assuming your engine starts with handleStart()
+    print("Unified Intelligence Engine Started! Agents evolving indefinitely.")
+    # Keep the main thread alive
+    import time
+    while True:
+        time.sleep(60)
