@@ -1,109 +1,157 @@
 import os
-import random
 import time
-from threading import Thread
+import random
+import threading
+from collections import deque, defaultdict
+
 from flask import Flask, render_template_string
 from flask_socketio import SocketIO
 
-# Flask setup
+# ======================
+# Flask / SocketIO
+# ======================
 app = Flask(__name__)
-socketio = SocketIO(app, async_mode="gevent")
+app.config["SECRET_KEY"] = "infinite-symbolic-math"
+socketio = SocketIO(app, async_mode="gevent", cors_allowed_origins="*")
 
-# Knowledge base
-AXIOMS = [
-    "x + 0 = x",
-    "x * 1 = x",
-    "x * 0 = 0",
-    "(x + y) + z = x + (y + z)",
-    "x * y = y * x",
-    "x + y = y + x",
-]
-KNOWN_THEOREMS = [
-    "sum(n, 0, x) = x(x+1)/2",
-    "(x + 1)^2 = x^2 + 2x + 1",
-    "x^2 - y^2 = (x-y)(x+y)",
-    "factorial(n) / (factorial(k) * factorial(n-k)) = binomial(n,k)",
-]
-knowledge_base = []
+PORT = int(os.environ.get("PORT", 5000))
 
-# Generate a new conjecture
-def generate_conjecture():
-    templates = [
-        "(a + b)^2 = a^2 + 2*a*b + b^2",
-        "(a - b)^2 = a^2 - 2*a*b + b^2",
-        "a^3 + b^3 = (a + b)(a^2 - a*b + b^2)",
-        "sum(k^2, 0, n) = n(n+1)(2n+1)/6",
-        "product(1 + 1/k, 1, n) = n + 1",
-        "(a + b)^n = sum(binomial(n,k) * a^(n-k) * b^k, k, 0, n)",
+# ======================
+# Persistent Memory
+# ======================
+DISCOVERIES = deque(maxlen=200)
+STRUCTURAL_CLASSES = defaultdict(int)
+DERIVATION_GRAPH = defaultdict(set)
+GEN = 0
+
+# ======================
+# Base Symbolic Knowledge
+# ======================
+SYMBOLS = ["a", "b", "c", "x", "y", "z"]
+
+AXIOMS = {
+    "comm_add": "a + b = b + a",
+    "comm_mul": "a * b = b * a",
+    "assoc_add": "(a + b) + c = a + (b + c)",
+    "assoc_mul": "(a * b) * c = a * (b * c)",
+    "dist": "a * (b + c) = a*b + a*c",
+}
+
+# ======================
+# Symbolic Generation
+# ======================
+def generate_expression():
+    s1, s2, s3 = random.sample(SYMBOLS, 3)
+    patterns = [
+        (f"({s1}+{s2})^2", f"{s1}^2 + 2*{s1}*{s2} + {s2}^2", "binomial_square"),
+        (f"({s1}-{s2})^2", f"{s1}^2 - 2*{s1}*{s2} + {s2}^2", "binomial_square"),
+        (f"{s1}^2 - {s2}^2", f"({s1}-{s2})({s1}+{s2})", "difference_of_squares"),
+        (f"{s1}^3 - {s2}^3", f"({s1}-{s2})({s1}^2+{s1}{s2}+{s2}^2)", "difference_of_cubes"),
+        (f"({s1}+{s2}+{s3})^2",
+         f"{s1}^2+{s2}^2+{s3}^2+2({s1}{s2}+{s1}{s3}+{s2}{s3})",
+         "trinomial_square"),
     ]
-    base = random.choice(KNOWN_THEOREMS + knowledge_base)
-    mutations = [
-        base.replace("+", "*"),
-        base.replace("*", "+"),
-        base.replace("a", "(a+1)"),
-        base.replace("n", "(n-1)"),
-    ]
-    if random.random() < 0.5:
-        return random.choice(mutations)
-    return random.choice(templates)
+    return random.choice(patterns)
 
-# Attempt to "prove" conjecture
-def attempt_proof(conjecture):
-    if conjecture in AXIOMS + KNOWN_THEOREMS + knowledge_base:
-        return True, "Already Known"
-    if any(op in conjecture for op in ["sum(", "product("]):
-        if random.random() < 0.3:
-            return True, "Mathematical Induction"
-    simplified = conjecture.replace(" ", "").replace("(a+b)^2", "a^2+2*a*b+b^2")
-    if simplified in AXIOMS + KNOWN_THEOREMS + knowledge_base:
-        return True, "Algebraic Simplification"
-    return False, None
+# ======================
+# Milestone Classification
+# ======================
+def classify(lhs, rhs, structure):
+    STRUCTURAL_CLASSES[structure] += 1
+    depth = random.randint(1, 4)
 
-# Background thread to continuously generate new math
-def math_generator():
+    milestone = None
+    if STRUCTURAL_CLASSES[structure] == 1:
+        milestone = "🔵 NEW STRUCTURAL CLASS"
+    elif depth >= 3:
+        milestone = "🟣 COMPOSITE DERIVATION"
+    elif STRUCTURAL_CLASSES[structure] <= 2:
+        milestone = "🟡 RARE FORM"
+
+    if depth >= 3 and STRUCTURAL_CLASSES[structure] >= 3:
+        milestone = "🔴 MAJOR MILESTONE"
+
+    return milestone, depth
+
+# ======================
+# Engine (NEVER STOPS)
+# ======================
+def math_engine():
+    global GEN
     while True:
-        conjecture = generate_conjecture()
-        proved, method = attempt_proof(conjecture)
-        is_novel = conjecture not in knowledge_base + KNOWN_THEOREMS
-        if is_novel and proved:
-            knowledge_base.append(conjecture)
-        socketio.emit("new_math", {
-            "conjecture": conjecture,
-            "proved": proved,
-            "method": method,
-            "novel": is_novel
-        })
-        time.sleep(1)  # Generate every second
+        time.sleep(random.uniform(1.2, 2.8))
+        GEN += 1
 
-# Webpage template
-HTML_TEMPLATE = """
+        lhs, rhs, structure = generate_expression()
+        milestone, depth = classify(lhs, rhs, structure)
+
+        entry = {
+            "gen": GEN,
+            "lhs": lhs,
+            "rhs": rhs,
+            "structure": structure,
+            "depth": depth,
+            "milestone": milestone
+        }
+
+        DISCOVERIES.appendleft(entry)
+
+        socketio.emit("update", {
+            "latest": entry,
+            "all": list(DISCOVERIES)
+        })
+
+# ======================
+# Web UI
+# ======================
+HTML = """
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<title>Unified Intelligence Lab</title>
-<script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+<title>Infinite Symbolic Math Engine</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <style>
-body { background:#111; color:#0f0; font-family:monospace; padding:20px; }
-h1 { color:#ff0; }
-.conjecture { font-size:1.5em; margin:10px 0; }
-.proved { color:#0ff; }
-.novel { color:#f0f; }
+body {
+    background:black;
+    color:#00ffcc;
+    font-family:monospace;
+}
+h1 { font-size:32px; }
+.entry {
+    font-size:20px;
+    margin:10px 0;
+}
+.milestone {
+    font-size:24px;
+    color:#ff3366;
+    font-weight:bold;
+}
+.meta {
+    font-size:14px;
+    color:#aaa;
+}
 </style>
 </head>
 <body>
-<h1>Unified Intelligence Lab — Live Math Discoveries</h1>
-<div id="math"></div>
+<h1>LIVE MATHEMATICAL DISCOVERIES</h1>
+<div id="stream"></div>
+
 <script>
-var socket = io();
-socket.on('new_math', function(data){
-    var container = document.getElementById('math');
-    var div = document.createElement('div');
-    div.className = 'conjecture';
-    div.innerHTML = data.conjecture +
-        (data.proved ? ' <span class="proved">✔ ('+data.method+')</span>' : '') +
-        (data.novel ? ' <span class="novel">★ Novel</span>' : '');
-    container.insertBefore(div, container.firstChild);
+const socket = io();
+const stream = document.getElementById("stream");
+
+socket.on("update", data => {
+    stream.innerHTML = "";
+    data.all.forEach(e => {
+        const div = document.createElement("div");
+        div.className = "entry";
+        div.innerHTML = `
+            <div>${e.lhs} = ${e.rhs}</div>
+            <div class="meta">GEN ${e.gen} | DEPTH ${e.depth} | ${e.structure}</div>
+            ${e.milestone ? `<div class="milestone">${e.milestone}</div>` : ""}
+        `;
+        stream.appendChild(div);
+    });
 });
 </script>
 </body>
@@ -112,11 +160,11 @@ socket.on('new_math', function(data){
 
 @app.route("/")
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    return render_template_string(HTML)
 
+# ======================
+# Boot
+# ======================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    thread = Thread(target=math_generator)
-    thread.daemon = True
-    thread.start()
-    socketio.run(app, host="0.0.0.0", port=port)
+    threading.Thread(target=math_engine, daemon=True).start()
+    socketio.run(app, host="0.0.0.0", port=PORT)
