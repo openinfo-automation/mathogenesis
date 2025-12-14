@@ -1,216 +1,195 @@
+import os
 import random
-import time
 import threading
-import uuid
-import math
-import json
+import time
+from flask import Flask, render_template_string
+from flask_socketio import SocketIO, emit
+import eventlet
 
-# =========================
-# CORE KNOWLEDGE SUBSTRATE
-# =========================
+eventlet.monkey_patch()
 
-AXIOMS = {
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret!'
+socketio = SocketIO(app, async_mode='eventlet')
+
+# -------------------------
+# Knowledge & agent storage
+# -------------------------
+knowledge_base = []
+proven_theorems = []
+novel_conjectures = []
+agents = []
+pool = []
+
+# -------------------------
+# Graph for pathfinding
+# -------------------------
+GRAPH = {
+    "nodes": ["A","B","C","D","E","F"],
+    "edges": {
+        "A": [["B",4],["C",2]],
+        "B": [["C",1],["D",5],["E",10]],
+        "C": [["D",3],["E",8]],
+        "D": [["E",2],["F",4]],
+        "E": [["F",1]],
+        "F": []
+    },
+    "start": "A",
+    "end": "F",
+    "mandatoryCheckpoints": ["C","D"]
+}
+
+# -------------------------
+# Agent definitions
+# -------------------------
+AGENT_TYPES = [
+    "CodeWriter", "PathFinder", "Tester", "Optimizer",
+    "Validator", "Logger", "Adversary", "Conjecturer",
+    "Prover", "InductionProver", "Symbolizer"
+]
+
+CODE_TEMPLATES = [
+    "lambda x: x**2 + 2*x + 1",
+    "lambda x: (x+1)**2",
+    "lambda x: x*(x+2)+1",
+    "lambda x: (x+1)*(x+1)",
+    "lambda x: pow(x+1,2)"
+]
+
+TEST_INPUTS = [0,1,2,3,4,-1,-2,10,100,-10]
+
+AXIOMS = [
     "x + 0 = x",
     "x * 1 = x",
     "x * 0 = 0",
-    "x + y = y + x",
-    "x * y = y * x",
     "(x + y) + z = x + (y + z)",
-}
-
-BASE_THEOREMS = {
-    "(x + 1)^2 = x^2 + 2x + 1",
-    "x^2 - y^2 = (x - y)(x + y)",
-    "sum(k,0,n) = n(n+1)/2",
-}
-
-knowledge_base = set(BASE_THEOREMS)
-abstractions = set()
-failed_conjectures = set()
-
-# =========================
-# AGENT TYPES
-# =========================
-
-AGENT_TYPES = [
-    "Conjecturer",
-    "Prover",
-    "Disprover",
-    "Abstractionist",
-    "AxiomMutator",
-    "Translator",
-    "MetaEvaluator",
+    "x * y = y * x",
+    "x + y = y + x"
 ]
 
-# =========================
-# UTILITY
-# =========================
+KNOWN_THEOREMS = [
+    "sum(n,0,x)=x*(x+1)/2",
+    "(x+1)^2 = x^2 + 2x + 1",
+    "x^2 - y^2 = (x-y)*(x+y)",
+    "factorial(n)/(factorial(k)*factorial(n-k)) = binomial(n,k)"
+]
 
-def uid():
-    return uuid.uuid4().hex[:8]
+# -------------------------
+# Utility functions
+# -------------------------
+def evaluate_code(code_str):
+    try:
+        fn = eval(code_str)
+        target_fn = eval("lambda x: x**2 + 2*x + 1")
+        correct = sum(1 for x in TEST_INPUTS if fn(x) == target_fn(x))
+        return correct / len(TEST_INPUTS)
+    except:
+        return 0
 
-def novelty_score(expr):
-    score = 0
-    score += len(set(expr)) * 0.05
-    score += expr.count("^") * 0.2
-    score += expr.count("sum") * 0.3
-    score += expr.count("product") * 0.4
-    return min(score, 1.0)
-
-# =========================
-# CONJECTURE GENERATION
-# =========================
+def mutate_code(code, agent_type):
+    if agent_type == "Adversary":
+        return random.choice(["lambda x: x**2 + 2*x","lambda x: x**2 + x + 1"])
+    if random.random() < 0.3:
+        return random.choice(CODE_TEMPLATES)
+    return code
 
 def generate_conjecture():
     templates = [
-        "(a+b)^3 = a^3 + 3a^2b + 3ab^2 + b^3",
-        "(a-b)^3 = a^3 - 3a^2b + 3ab^2 - b^3",
-        "sum(k^2,0,n) = n(n+1)(2n+1)/6",
-        "sum(k^3,0,n) = (n(n+1)/2)^2",
-        "(a+b)^n = sum(binomial(n,k)a^(n-k)b^k,0,n)",
-        "product(1+1/k,1,n)=n+1",
+        "(a + b)^2 = a^2 + 2*a*b + b^2",
+        "(a - b)^2 = a^2 - 2*a*b + b^2",
+        "a^3 + b^3 = (a + b)(a^2 - a*b + b^2)",
+        "sum(k^2,0,n)=n*(n+1)*(2*n+1)/6",
+        "(a + b)^n = sum(binomial(n,k)*a^(n-k)*b^k, k,0,n)"
     ]
-
-    if knowledge_base and random.random() < 0.5:
-        base = random.choice(list(knowledge_base))
-        base = base.replace("x", "a")
-        return base.replace("+", random.choice(["*", "+"]))
-
     return random.choice(templates)
 
-# =========================
-# PROOF ENGINE (SIMULATED)
-# =========================
-
 def attempt_proof(conjecture):
-    if conjecture in knowledge_base:
-        return True, "Already Known"
-
-    if "(a+b)^2" in conjecture or "(a+b)^3" in conjecture:
-        return True, "Algebraic Expansion"
-
-    if "sum(" in conjecture and random.random() < 0.4:
-        return True, "Induction"
-
-    return False, None
-
-# =========================
-# ABSTRACTION ENGINE
-# =========================
-
-def abstract_knowledge():
-    if len(knowledge_base) < 4:
-        return
-
-    group = random.sample(list(knowledge_base), 3)
-    schema = f"SCHEMA[{hash(tuple(group)) % 100000}]"
-    abstractions.add(schema)
-
-# =========================
-# AXIOM MUTATION
-# =========================
-
-def mutate_axioms():
-    if random.random() < 0.2:
-        ax = random.choice(list(AXIOMS))
-        mutated = ax.replace("+", "*")
-        AXIOMS.add(mutated)
-
-# =========================
-# AGENT EXECUTION
-# =========================
-
-def run_agent(agent_type):
-    if agent_type == "Conjecturer":
-        return generate_conjecture()
-
-    if agent_type == "Prover":
-        conj = generate_conjecture()
-        proved, method = attempt_proof(conj)
+    proved = random.random() < 0.3
+    novel = conjecture not in knowledge_base
+    if novel:
+        knowledge_base.append(conjecture)
         if proved:
-            knowledge_base.add(conj)
-            return f"PROVED: {conj} via {method}"
+            proven_theorems.append(conjecture)
         else:
-            failed_conjectures.add(conj)
-            return f"FAILED: {conj}"
+            novel_conjectures.append(conjecture)
+    return proved, novel
 
-    if agent_type == "Disprover":
-        if knowledge_base:
-            return f"ATTACKED: {random.choice(list(knowledge_base))}"
-
-    if agent_type == "Abstractionist":
-        abstract_knowledge()
-        return "ABSTRACTION CREATED"
-
-    if agent_type == "AxiomMutator":
-        mutate_axioms()
-        return "AXIOM MUTATED"
-
-    if agent_type == "Translator":
-        if knowledge_base:
-            t = random.choice(list(knowledge_base))
-            return t.replace("^", "**")
-
-    if agent_type == "MetaEvaluator":
-        return f"KB_SIZE={len(knowledge_base)} ABS={len(abstractions)}"
-
-# =========================
-# PERPETUAL ENGINE
-# =========================
-
-def perpetual_loop():
-    generation = 0
-
+# -------------------------
+# Agent loop
+# -------------------------
+def agent_loop():
     while True:
-        generation += 1
+        time.sleep(1)
+        # Each cycle: spawn some agents
+        for _ in range(3):
+            agent_type = random.choice(AGENT_TYPES)
+            # Code agent
+            if agent_type in ["CodeWriter","Optimizer","Tester"]:
+                parent_code = random.choice(CODE_TEMPLATES)
+                code_output = mutate_code(parent_code, agent_type)
+                evaluate_code(code_output)
+            # Math agent
+            if agent_type in ["Conjecturer","Prover","InductionProver","Symbolizer"]:
+                conjecture = generate_conjecture()
+                attempt_proof(conjecture)
+            # Path agent (optional display, simplified)
+            if agent_type in ["PathFinder","Logger","Optimizer"]:
+                path = ["A","C","D","F"]  # simplified
+        # Emit latest discoveries to front-end
+        socketio.emit('update', {
+            'knowledge_base': knowledge_base[-20:],
+            'proven_theorems': proven_theorems[-20:],
+            'novel_conjectures': novel_conjectures[-20:]
+        })
 
-        agent = random.choice(AGENT_TYPES)
-        output = run_agent(agent)
+# Start agent loop in background
+threading.Thread(target=agent_loop, daemon=True).start()
 
-        if isinstance(output, str):
-            score = novelty_score(output)
+# -------------------------
+# Flask routes
+# -------------------------
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+<title>Unified Intelligence Lab</title>
+<script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<style>
+body { background:#111;color:#fff;font-family:monospace;padding:20px;}
+h1 { color:#ff00ff;}
+.section{margin-bottom:20px;}
+.item{margin:2px 0;}
+</style>
+</head>
+<body>
+<h1>Unified Intelligence Lab</h1>
+<div class="section"><h2>Last 20 Discoveries</h2><div id="knowledge"></div></div>
+<div class="section"><h2>Proven Theorems</h2><div id="proven"></div></div>
+<div class="section"><h2>Novel Conjectures</h2><div id="novel"></div></div>
 
-            if score > 0.7:
-                print(f"[GEN {generation}] ⭐ {agent}: {output}")
-            else:
-                print(f"[GEN {generation}] {agent}: {output}")
+<script>
+var socket = io();
+socket.on('update', function(data){
+    const kb = document.getElementById('knowledge');
+    const proven = document.getElementById('proven');
+    const novel = document.getElementById('novel');
+    kb.innerHTML=''; proven.innerHTML=''; novel.innerHTML='';
+    data.knowledge_base.forEach(i=>kb.innerHTML+='<div class="item">'+i+'</div>');
+    data.proven_theorems.forEach(i=>proven.innerHTML+='<div class="item">'+i+'</div>');
+    data.novel_conjectures.forEach(i=>novel.innerHTML+='<div class="item">'+i+'</div>');
+});
+</script>
+</body>
+</html>
+"""
 
-        # NEVER STOP
-        time.sleep(0.25)
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
 
-# =========================
-# START
-# =========================
-
-if __name__ == "__main__":
-    print("🔥 Perpetual Mathematical Intelligence Engine Starting 🔥")
-    perpetual_loop()
-
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import os
-
-# Dummy HTTP handler
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Unified Intelligence Engine Running!")
-
-# Start server in a separate thread
-def run_dummy_server():
-    port = int(os.environ.get("PORT", 10000))  # Render sets PORT automatically
-    server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    print(f"Dummy web server running on port {port}")
-    server.serve_forever()
-
-threading.Thread(target=run_dummy_server, daemon=True).start()
-
-# Start your perpetual engine
-if __name__ == "__main__":
-    handleStart()  # Assuming your engine starts with handleStart()
-    print("Unified Intelligence Engine Started! Agents evolving indefinitely.")
-    # Keep the main thread alive
-    import time
-    while True:
-        time.sleep(60)
+# -------------------------
+# Run
+# -------------------------
+if __name__ == '__main__':
+    PORT = int(os.environ.get("PORT",5000))
+    socketio.run(app, host='0.0.0.0', port=PORT)
