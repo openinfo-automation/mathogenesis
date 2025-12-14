@@ -15,6 +15,11 @@ DB_FILE = "knowledge_base.json"
 running = False
 knowledge_base = []
 
+# --- AGENT STATS ---
+agents_spawned = 0
+novel_conjectures = 0
+proven_theorems = 0
+
 def load_db():
     global knowledge_base
     if os.path.exists(DB_FILE):
@@ -48,25 +53,6 @@ CONJECTURE_TEMPLATES = [
     "integral(exp(-x^2), -inf, inf) = sqrt(pi)"
 ]
 
-# ===== SYSTEM ESCALATION FLAGS =====
-representation_mutation_enabled = False
-axiom_mutation_enabled = False
-novelty_filter_enabled = False
-
-# Track milestones
-milestones = {
-    'representation_mutation': False,
-    'axiom_mutation': False,
-    'novelty_filter': False
-}
-
-# Track agent stats
-agent_stats = {
-    'agents_spawned': 0,
-    'proven_theorems': 0,
-    'novel_conjectures': 0
-}
-
 def attempt_proof(conjecture):
     if conjecture in knowledge_base:
         return False, "Redundant" 
@@ -80,27 +66,10 @@ def attempt_proof(conjecture):
     return False, None
 
 def evolution_loop():
-    global running
+    global running, agents_spawned, novel_conjectures, proven_theorems
     while running:
-        agent_stats['agents_spawned'] += 1
+        agents_spawned += 1
 
-        # ===== AUTO-ACTIVATION BASED ON SYSTEM OBSERVATION =====
-        if not milestones['novelty_filter'] and len(knowledge_base) >= 5:
-            novelty_filter_enabled = True
-            milestones['novelty_filter'] = True
-            socketio.emit('discovery', {'text': "💡 NOVELTY FILTER ACTIVATED!"})
-
-        if not milestones['representation_mutation'] and len(knowledge_base) >= 10:
-            representation_mutation_enabled = True
-            milestones['representation_mutation'] = True
-            socketio.emit('discovery', {'text': "💡 REPRESENTATION MUTATION ENABLED!"})
-
-        if not milestones['axiom_mutation'] and len(knowledge_base) >= 15:
-            axiom_mutation_enabled = True
-            milestones['axiom_mutation'] = True
-            socketio.emit('discovery', {'text': "💡 AXIOM MUTATION ENABLED!"})
-
-        # ===== CONJECTURE SELECTION =====
         if knowledge_base and random.random() < 0.6:
             template = random.choice(knowledge_base)
             mode = "RECURSIVE"
@@ -109,8 +78,7 @@ def evolution_loop():
             mode = "BASE"
 
         conjecture = template
-
-        # ===== MUTATION PHASE =====
+        
         mut_roll = random.random()
         if mut_roll < 0.3:
             conjecture = conjecture.replace("a", "((r_0 + 1) * a)")
@@ -119,32 +87,20 @@ def evolution_loop():
         elif mut_roll < 0.6:
             conjecture = conjecture.replace("hbar", "(hbar * kappa)")
 
-        if representation_mutation_enabled and random.random() < 0.3:
-            conjecture = conjecture.replace("c", "(c * gamma)")
-
-        if axiom_mutation_enabled and random.random() < 0.2:
-            conjecture = f"mutated_axiom({conjecture})"
-
-        if novelty_filter_enabled and conjecture in knowledge_base:
-            socketio.emit('discovery', {'text': f"Filtered redundant: {conjecture}"})
-            socketio.sleep(0.5)
-            continue
-
         proved, method = attempt_proof(conjecture)
         
         if proved:
+            proven_theorems += 1
             save_db(conjecture)
-            agent_stats['proven_theorems'] += 1
             socketio.emit('new_theorem', {'text': f"🎓 PROVED [{mode}]: {conjecture}"})
         else:
-            agent_stats['novel_conjectures'] += 1
+            novel_conjectures += 1
             socketio.emit('discovery', {'text': f"Scanning: {conjecture}"})
         
-        # ===== EMIT AGENT STATS =====
-        socketio.emit('status_update', {
-            'agents_spawned': agent_stats['agents_spawned'],
-            'proven_theorems': agent_stats['proven_theorems'],
-            'novel_conjectures': agent_stats['novel_conjectures']
+        socketio.emit('agent_stats', {
+            'agents': agents_spawned,
+            'proven': proven_theorems,
+            'novel': novel_conjectures
         })
 
         socketio.sleep(0.5)
@@ -206,10 +162,10 @@ HTML_TEMPLATE = """
         </div>
         <div class="panel">
             <div class="panel-header">AGENT_STATS</div>
-            <div id="stats" class="content">
-                <div>Agents Spawned: 0</div>
-                <div>Proven Theorems: 0</div>
-                <div>Novel Conjectures: 0</div>
+            <div class="content">
+                Agents Spawned: <span id="agents">0</span><br>
+                Proven Theorems: <span id="proven">0</span><br>
+                Novel Conjectures: <span id="novel">0</span>
             </div>
         </div>
     </div>
@@ -232,13 +188,10 @@ HTML_TEMPLATE = """
             div.className = 'theorem'; div.textContent = data.text;
             document.getElementById('kb').prepend(div);
         });
-        socket.on('status_update', (data) => {
-            const stats = document.getElementById('stats');
-            stats.innerHTML = `
-                <div>Agents Spawned: ${data.agents_spawned}</div>
-                <div>Proven Theorems: ${data.proven_theorems}</div>
-                <div>Novel Conjectures: ${data.novel_conjectures}</div>
-            `;
+        socket.on('agent_stats', (data) => {
+            document.getElementById('agents').textContent = data.agents;
+            document.getElementById('proven').textContent = data.proven;
+            document.getElementById('novel').textContent = data.novel;
         });
     </script>
 </body>
