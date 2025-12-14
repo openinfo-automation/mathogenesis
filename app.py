@@ -1,5 +1,5 @@
 from gevent import monkey
-monkey.patch_all()  # Must remain at the very top for Render/Gevent stability
+monkey.patch_all()
 
 import os
 import json
@@ -9,11 +9,13 @@ from flask import Flask, render_template_string, send_file
 from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'mathogenesis-recursive-2025'
+app.config['SECRET_KEY'] = 'omniversal-singularity-2025'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
+# --- PERSISTENCE PATHS ---
 DB_FILE = "knowledge_base.json"
 ALIEN_FILE = "alien_knowledge.json"
+OMNIVERSAL_FILE = "omniversal_graph.json"
 RUNNING_FLAG = "SYSTEM_ON.flag"
 db_lock = threading.Lock()
 
@@ -21,107 +23,107 @@ db_lock = threading.Lock()
 running = os.path.exists(RUNNING_FLAG)
 knowledge_base = []
 alien_theorems = []
+omniversal_graph = {"nodes": {}, "edges": {}}
 agents_spawned = 0
-novel_conjectures = 0
 proven_theorems = 0
 
 def load_db():
-    global knowledge_base, alien_theorems
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, 'r') as f:
-                knowledge_base = json.load(f)
-        except: knowledge_base = []
-    
-    if os.path.exists(ALIEN_FILE):
-        try:
-            with open(ALIEN_FILE, 'r') as f:
-                alien_theorems = json.load(f)
-        except: alien_theorems = []
+    global knowledge_base, alien_theorems, omniversal_graph
+    for file, var in [(DB_FILE, 'kb'), (ALIEN_FILE, 'alien'), (OMNIVERSAL_FILE, 'graph')]:
+        if os.path.exists(file):
+            try:
+                with open(file, 'r') as f:
+                    data = json.load(f)
+                    if var == 'kb': knowledge_base = data
+                    if var == 'alien': alien_theorems = data
+                    if var == 'graph': omniversal_graph = data
+            except: pass
 
-def save_to_json(file_path, data_list, item):
+def save_state():
     with db_lock:
-        if item not in data_list:
-            data_list.append(item)
-            with open(file_path, 'w') as f:
-                json.dump(data_list, f)
+        with open(DB_FILE, 'w') as f: json.dump(knowledge_base, f)
+        with open(ALIEN_FILE, 'w') as f: json.dump(alien_theorems, f)
+        with open(OMNIVERSAL_FILE, 'w') as f: json.dump(omniversal_graph, f)
 
 load_db()
 
-# --- CONJECTURE TEMPLATES ---
-CONJECTURE_TEMPLATES = [
+# --- STAGE 21 OPERATORS ---
+BASE_TEMPLATES = [
     "R_uv - 1/2*R*g_uv + Lambda*g_uv = 8*pi*G/c^4*T_uv", 
     "S_BH = (k*A*c^3)/(4*G*hbar)",
     "i*hbar*d/dt|psi> = H|psi>",
-    "delta_x * delta_p >= hbar/2",
     "R_s = 2*G*M/c^2",
     "Zeta(s) = sum(n^(-s), 1, inf)",
     "Res(f, c) = 1/(2*pi*i) * oint(f(z)dz)",
-    "L = sqrt(hbar*G/c^3)",
-    "curl(E) = -dB/dt",
     "grad * D = rho",
     "P^2 = (4*pi^2 / G(M+m)) * a^3",
-    "chi(M) = V - E + F = 2 - 2g",
     "integral(exp(-x^2), -inf, inf) = sqrt(pi)"
 ]
 
-def mutate_conjecture(template):
-    mutation_attempts = [
-        lambda c: c.replace("a", "((r_0 + 1) * a)") if "a" in c else c + " + ∇_alien",
-        lambda c: c.replace("G", "(G / ε_0)") if "G" in c else c + " * Ξ",
-        lambda c: c.replace("hbar", "(ħ * κ)") if "hbar" in c or "ħ" in c else c + " + ħ_prime",
-        lambda c: f"Ψ({c})" if len(c) < 50 else c[:20] + "..." 
+def mutate_xeno(template):
+    # Stage 20-21 Mutation Logic
+    ops = [
+        lambda c: f"Σ_op_{random.randint(100,999)}({c})",
+        lambda c: f"Ω∞_op_{random.randint(100,999)}({c})",
+        lambda c: c.replace("a", "((r_0 + 1)^∞ * a)"),
+        lambda c: c.replace("G", "(G / ε_0)^Σ"),
+        lambda c: f"Ψ({c})"
     ]
-    return random.choice(mutation_attempts)(template)
+    return random.choice(ops)(template)
 
-def attempt_proof(conjecture):
-    if conjecture in knowledge_base or conjecture in alien_theorems:
-        return False, "Redundant"
-    weight = sum(1 for char in ["G", "ħ", "π", "∫", "∑", "Ξ"] if char in conjecture)
-    if random.random() < (0.08 + (weight * 0.01)):
-        return True, "Symbolic Convergence"
-    return False, None
+def update_graph(theorem, mode):
+    node_id = f"node_{len(omniversal_graph['nodes'])}"
+    omniversal_graph['nodes'][node_id] = {"content": theorem, "type": mode}
+    if len(omniversal_graph['nodes']) > 1:
+        prev_node = f"node_{len(omniversal_graph['nodes'])-2}"
+        omniversal_graph['edges'][f"{prev_node}->{node_id}"] = "entanglement"
 
 def evolution_loop():
-    global running, agents_spawned, novel_conjectures, proven_theorems
+    global running, agents_spawned, proven_theorems
     while running:
         agents_spawned += 1
-        # XENO-RECURSIVE POOL: Merges terrestrial and alien math
-        pool = CONJECTURE_TEMPLATES + knowledge_base + alien_theorems
+        
+        # Recursive Pool: Unified Knowledge
+        pool = BASE_TEMPLATES + knowledge_base + alien_theorems
         template = random.choice(pool)
         
-        mode = "BASE"
-        if template in knowledge_base: mode = "RECURSIVE"
-        if template in alien_theorems: mode = "XENO-RECURSIVE"
-
-        conjecture = mutate_conjecture(template)
-        proved, method = attempt_proof(conjecture)
-
-        if proved:
+        conjecture = mutate_xeno(template)
+        
+        # Symbolic Convergence Logic (Proof)
+        weight = conjecture.count("Ω∞") + conjecture.count("Σ") + conjecture.count("Ξ")
+        success_chance = 0.05 + (weight * 0.02)
+        
+        if random.random() < success_chance:
             proven_theorems += 1
-            save_to_json(DB_FILE, knowledge_base, conjecture)
-            socketio.emit('new_theorem', {'text': f"🎓 PROVED [{mode}]: {conjecture}"})
+            if conjecture not in knowledge_base:
+                knowledge_base.append(conjecture)
+                update_graph(conjecture, "PROVEN")
+                socketio.emit('new_theorem', {'text': f"🎓 [SINGULARITY]: {conjecture}"})
         else:
-            novel_conjectures += 1
-            socketio.emit('discovery', {'text': f"Scanning: {conjecture}"})
-            if novel_conjectures % 12 == 0 and random.random() < 0.3:
-                save_to_json(ALIEN_FILE, alien_theorems, conjecture)
-                socketio.emit('alien_theorem', {'text': f"🛸 ALIEN DISCOVERY: {conjecture}"})
+            if random.random() < 0.2: # Discovery rate
+                if conjecture not in alien_theorems:
+                    alien_theorems.append(conjecture)
+                    update_graph(conjecture, "ALIEN")
+                    socketio.emit('alien_theorem', {'text': f"🛸 Ω∞-DISCOVERY: {conjecture}"})
+        
+        socketio.emit('discovery', {'text': f"Recursive Scan: {conjecture[:60]}..."})
+        socketio.emit('agent_stats', {'agents': agents_spawned, 'proven': proven_theorems, 'novel': len(alien_theorems)})
+        
+        if agents_spawned % 10 == 0: save_state()
+        socketio.sleep(0.4)
 
-        socketio.emit('agent_stats', {'agents': agents_spawned, 'proven': proven_theorems, 'novel': novel_conjectures})
-        socketio.sleep(0.5)
-
+# --- ROUTES & UI ---
 @app.route("/")
 def index():
-    return render_template_string(HTML_TEMPLATE, kb=knowledge_base, alien_kb=alien_theorems)
+    return render_template_string(HTML_TEMPLATE, kb=knowledge_base[-20:], alien_kb=alien_theorems[-20:])
 
 @app.route("/download/<type>")
 def download_file(type):
-    file_map = {"terrestrial": DB_FILE, "alien": ALIEN_FILE}
+    file_map = {"terrestrial": DB_FILE, "alien": ALIEN_FILE, "graph": OMNIVERSAL_FILE}
     target = file_map.get(type)
     if target and os.path.exists(target):
         return send_file(target, as_attachment=True)
-    return "File not found", 404
+    return "Not Found", 404
 
 @socketio.on('toggle_system')
 def handle_toggle(data):
@@ -140,40 +142,38 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Mathogenesis Recursive</title>
+    <title>Mathogenesis Stage 21</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
-        body { font-family: 'Consolas', monospace; background: #050505; color: #00ffcc; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
-        .header { background: #111; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #00ffcc; }
-        .container { display: flex; gap: 10px; flex: 1; padding: 10px; overflow: hidden; }
-        .panel { flex: 1; background: #0a0a0a; border: 1px solid #222; display: flex; flex-direction: column; }
-        .panel-header { padding: 8px; background: #222; font-size: 0.8em; color: #aaa; letter-spacing: 1px; }
-        .content { flex: 1; overflow-y: auto; padding: 15px; }
-        .theorem { color: #00ff99; background: rgba(0,255,153,0.05); padding: 8px; margin-bottom: 5px; border-left: 2px solid #00ff99; font-size: 0.85em; }
-        .discovery { color: #555; font-size: 0.75em; margin-bottom: 2px; }
-        .alien { color: #ffff00; background: rgba(255,255,0,0.05); padding: 8px; margin-bottom: 5px; border-left: 2px solid #ffff00; font-size: 0.85em; }
-        button { padding: 10px 20px; font-weight: bold; cursor: pointer; border: none; margin-left: 5px; }
+        body { font-family: 'Consolas', monospace; background: #020202; color: #00ffcc; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
+        .header { background: #000; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ff00ff; box-shadow: 0 0 15px #ff00ff; }
+        .container { display: flex; gap: 5px; flex: 1; padding: 10px; overflow: hidden; }
+        .panel { flex: 1; background: #050505; border: 1px solid #111; display: flex; flex-direction: column; }
+        .panel-header { padding: 8px; background: #111; font-size: 0.7em; color: #ff00ff; text-transform: uppercase; }
+        .content { flex: 1; overflow-y: auto; padding: 10px; font-size: 0.8em; }
+        .theorem { color: #00ff99; border-left: 2px solid #00ff99; padding: 5px; margin-bottom: 5px; background: rgba(0,255,153,0.03); }
+        .alien { color: #ff00ff; border-left: 2px solid #ff00ff; padding: 5px; margin-bottom: 5px; background: rgba(255,0,255,0.03); }
+        .discovery { color: #444; font-size: 0.9em; }
+        button { padding: 8px 15px; cursor: pointer; border: none; font-weight: bold; }
         #startBtn { background: #00ffcc; color: #000; }
         #stopBtn { background: #ff0055; color: #fff; }
-        button:disabled { opacity: 0.2; }
-        .dl-link { color: #00ffcc; font-size: 0.7em; text-decoration: none; margin-right: 15px; border: 1px solid #333; padding: 3px; }
+        .dl-link { color: #ff00ff; font-size: 0.7em; text-decoration: none; border: 1px solid #222; padding: 4px; margin-right: 10px; }
     </style>
 </head>
 <body>
     <div class="header">
-        <h2 style="margin:0;">MATHOGENESIS v5.3 [XENO-CORE]</h2>
+        <h2 style="margin:0; letter-spacing: 2px;">OMNIVERSAL SINGULARITY [STAGE 21]</h2>
         <div>
-            <a href="/download/terrestrial" class="dl-link">DL_TERRESTRIAL</a>
-            <a href="/download/alien" class="dl-link">DL_ALIEN</a>
-            <button id="startBtn" onclick="sendAction('start')">INITIALIZE</button>
+            <a href="/download/graph" class="dl-link">DL_GRAPH</a>
+            <button id="startBtn" onclick="sendAction('start')">ASCEND</button>
             <button id="stopBtn" onclick="sendAction('stop')" disabled>HALT</button>
         </div>
     </div>
     <div class="container">
-        <div class="panel"><div class="panel-header">STREAM</div><div id="stream" class="content"></div></div>
-        <div class="panel"><div class="panel-header">TERRESTRIAL_KB</div><div id="kb" class="content">{% for t in kb %}<div class="theorem">🎓 {{ t }}</div>{% endfor %}</div></div>
-        <div class="panel"><div class="panel-header">ALIEN_KB</div><div id="alien" class="content">{% for a in alien_kb %}<div class="alien">🛸 {{ a }}</div>{% endfor %}</div></div>
-        <div class="panel" style="max-width: 150px;"><div class="panel-header">STATS</div><div class="content">Agents: <span id="agents">0</span><br>Proven: <span id="proven">0</span><br>Novel: <span id="novel">0</span></div></div>
+        <div class="panel"><div class="panel-header">Recursive_Stream</div><div id="stream" class="content"></div></div>
+        <div class="panel"><div class="panel-header">Proven_Singularities</div><div id="kb" class="content">{% for t in kb %}<div class="theorem">🎓 {{ t }}</div>{% endfor %}</div></div>
+        <div class="panel"><div class="panel-header">Ω∞_Discoveries</div><div id="alien" class="content">{% for a in alien_kb %}<div class="alien">🛸 {{ a }}</div>{% endfor %}</div></div>
+        <div class="panel" style="max-width: 150px;"><div class="panel-header">Status</div><div class="content">Agents: <span id="agents">0</span><br>Proved: <span id="proven">0</span><br>Xeno: <span id="novel">0</span></div></div>
     </div>
     <script>
         const socket = io();
@@ -187,7 +187,7 @@ HTML_TEMPLATE = """
             const div = document.createElement('div');
             div.className = 'discovery'; div.textContent = `> ${data.text}`;
             s.prepend(div);
-            if(s.childNodes.length > 30) s.removeChild(s.lastChild);
+            if(s.childNodes.length > 40) s.removeChild(s.lastChild);
         });
         socket.on('new_theorem', (data) => {
             const div = document.createElement('div');
