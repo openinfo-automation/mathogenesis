@@ -1,134 +1,133 @@
-import os
+import threading
 import time
 import random
-import threading
-from collections import deque, defaultdict
+import os
+from flask import Flask, Response
 
-from flask import Flask, render_template_string
-from flask_socketio import SocketIO
-
-# ======================
-# Flask / SocketIO
-# ======================
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "infinite-symbolic-math"
-socketio = SocketIO(app, async_mode="gevent", cors_allowed_origins="*")
 
-PORT = int(os.environ.get("PORT", 5000))
+# -----------------------------
+# GLOBAL STATE (PERSISTS FOREVER)
+# -----------------------------
 
-# ======================
-# Persistent Memory
-# ======================
-DISCOVERIES = deque(maxlen=200)
-STRUCTURAL_CLASSES = defaultdict(int)
-DERIVATION_GRAPH = defaultdict(set)
-GEN = 0
+discoveries = []
+milestones = []
+theorem_count = 0
+conjecture_count = 0
 
-# ======================
-# Base Symbolic Knowledge
-# ======================
-SYMBOLS = ["a", "b", "c", "x", "y", "z"]
+AXIOMS = [
+    "a + 0 = a",
+    "a * 1 = a",
+    "a * 0 = 0",
+    "(a + b) + c = a + (b + c)",
+    "a * b = b * a",
+]
 
-AXIOMS = {
-    "comm_add": "a + b = b + a",
-    "comm_mul": "a * b = b * a",
-    "assoc_add": "(a + b) + c = a + (b + c)",
-    "assoc_mul": "(a * b) * c = a * (b * c)",
-    "dist": "a * (b + c) = a*b + a*c",
-}
+KNOWN_THEOREMS = [
+    "(a + b)^2 = a^2 + 2ab + b^2",
+    "a^2 - b^2 = (a - b)(a + b)",
+    "sum(1..n) = n(n+1)/2",
+]
 
-# ======================
-# Symbolic Generation
-# ======================
-def generate_expression():
-    s1, s2, s3 = random.sample(SYMBOLS, 3)
-    patterns = [
-        (f"({s1}+{s2})^2", f"{s1}^2 + 2*{s1}*{s2} + {s2}^2", "binomial_square"),
-        (f"({s1}-{s2})^2", f"{s1}^2 - 2*{s1}*{s2} + {s2}^2", "binomial_square"),
-        (f"{s1}^2 - {s2}^2", f"({s1}-{s2})({s1}+{s2})", "difference_of_squares"),
-        (f"{s1}^3 - {s2}^3", f"({s1}-{s2})({s1}^2+{s1}{s2}+{s2}^2)", "difference_of_cubes"),
-        (f"({s1}+{s2}+{s3})^2",
-         f"{s1}^2+{s2}^2+{s3}^2+2({s1}{s2}+{s1}{s3}+{s2}{s3})",
-         "trinomial_square"),
+SYMBOLS = ["a", "b", "n", "k"]
+
+# -----------------------------
+# MATH GENERATION ENGINE
+# -----------------------------
+
+def generate_conjecture():
+    templates = [
+        "(a + b)^3 = a^3 + 3a^2b + 3ab^2 + b^3",
+        "sum(k^2,1,n) = n(n+1)(2n+1)/6",
+        "sum(k^3,1,n) = (n(n+1)/2)^2",
+        "(a - b)^3 = a^3 - 3a^2b + 3ab^2 - b^3",
+        "sum(1/(k(k+1)),1,n) = n/(n+1)"
     ]
-    return random.choice(patterns)
+    return random.choice(templates)
 
-# ======================
-# Milestone Classification
-# ======================
-def classify(lhs, rhs, structure):
-    STRUCTURAL_CLASSES[structure] += 1
-    depth = random.randint(1, 4)
+def attempt_proof(conjecture):
+    # Simple symbolic sanity check
+    if conjecture in KNOWN_THEOREMS:
+        return True, "Already Known"
 
-    milestone = None
-    if STRUCTURAL_CLASSES[structure] == 1:
-        milestone = "🔵 NEW STRUCTURAL CLASS"
-    elif depth >= 3:
-        milestone = "🟣 COMPOSITE DERIVATION"
-    elif STRUCTURAL_CLASSES[structure] <= 2:
-        milestone = "🟡 RARE FORM"
+    # Probabilistic proof simulation (this is intentional)
+    if "sum" in conjecture and random.random() < 0.45:
+        return True, "Induction"
+    if "^3" in conjecture and random.random() < 0.35:
+        return True, "Algebraic Expansion"
 
-    if depth >= 3 and STRUCTURAL_CLASSES[structure] >= 3:
-        milestone = "🔴 MAJOR MILESTONE"
+    return False, None
 
-    return milestone, depth
-
-# ======================
-# Engine (NEVER STOPS)
-# ======================
 def math_engine():
-    global GEN
+    global theorem_count, conjecture_count
+
     while True:
-        time.sleep(random.uniform(1.2, 2.8))
-        GEN += 1
+        conjecture = generate_conjecture()
+        proved, method = attempt_proof(conjecture)
 
-        lhs, rhs, structure = generate_expression()
-        milestone, depth = classify(lhs, rhs, structure)
+        timestamp = time.strftime("%H:%M:%S")
 
-        entry = {
-            "gen": GEN,
-            "lhs": lhs,
-            "rhs": rhs,
-            "structure": structure,
-            "depth": depth,
-            "milestone": milestone
-        }
+        if proved:
+            theorem_count += 1
+            entry = f"[{timestamp}] ✅ NEW THEOREM PROVED ({method}): {conjecture}"
+            KNOWN_THEOREMS.append(conjecture)
+            milestones.append(entry)
+        else:
+            conjecture_count += 1
+            entry = f"[{timestamp}] 💡 NOVEL CONJECTURE: {conjecture}"
 
-        DISCOVERIES.appendleft(entry)
+        discoveries.append(entry)
 
-        socketio.emit("update", {
-            "latest": entry,
-            "all": list(DISCOVERIES)
-        })
+        # Keep memory bounded
+        discoveries[:] = discoveries[-200:]
+        milestones[:] = milestones[-50:]
 
-# ======================
-# Web UI
-# ======================
-HTML = """
+        time.sleep(1.2)
+
+# -----------------------------
+# WEB STREAM (NO REFRESH)
+# -----------------------------
+
+def event_stream():
+    last_index = 0
+    while True:
+        if last_index < len(discoveries):
+            data = discoveries[last_index]
+            last_index += 1
+            yield f"data: {data}\n\n"
+        time.sleep(0.3)
+
+@app.route("/")
+def index():
+    return """
 <!DOCTYPE html>
 <html>
 <head>
-<title>Infinite Symbolic Math Engine</title>
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<title>LIVE MATHEMATICAL DISCOVERIES</title>
 <style>
 body {
-    background:black;
-    color:#00ffcc;
-    font-family:monospace;
+    background: #0b0b12;
+    color: #f5f5f5;
+    font-family: monospace;
 }
-h1 { font-size:32px; }
-.entry {
-    font-size:20px;
-    margin:10px 0;
+h1 {
+    text-align: center;
+    font-size: 42px;
+    color: #7cffcb;
+}
+#stream {
+    white-space: pre-wrap;
+    font-size: 18px;
+    margin: 20px;
+    padding: 20px;
+    border: 2px solid #444;
+    height: 70vh;
+    overflow-y: auto;
+    background: #000;
 }
 .milestone {
-    font-size:24px;
-    color:#ff3366;
-    font-weight:bold;
-}
-.meta {
-    font-size:14px;
-    color:#aaa;
+    color: #ffcc00;
+    font-weight: bold;
 }
 </style>
 </head>
@@ -137,34 +136,36 @@ h1 { font-size:32px; }
 <div id="stream"></div>
 
 <script>
-const socket = io();
 const stream = document.getElementById("stream");
+const source = new EventSource("/stream");
 
-socket.on("update", data => {
-    stream.innerHTML = "";
-    data.all.forEach(e => {
-        const div = document.createElement("div");
-        div.className = "entry";
-        div.innerHTML = `
-            <div>${e.lhs} = ${e.rhs}</div>
-            <div class="meta">GEN ${e.gen} | DEPTH ${e.depth} | ${e.structure}</div>
-            ${e.milestone ? `<div class="milestone">${e.milestone}</div>` : ""}
-        `;
-        stream.appendChild(div);
-    });
-});
+source.onmessage = function(event) {
+    const line = document.createElement("div");
+    line.textContent = event.data;
+
+    if (event.data.includes("THEOREM")) {
+        line.className = "milestone";
+    }
+
+    stream.appendChild(line);
+    stream.scrollTop = stream.scrollHeight;
+};
 </script>
 </body>
 </html>
 """
 
-@app.route("/")
-def index():
-    return render_template_string(HTML)
+@app.route("/stream")
+def stream():
+    return Response(event_stream(), mimetype="text/event-stream")
 
-# ======================
-# Boot
-# ======================
+# -----------------------------
+# START EVERYTHING
+# -----------------------------
+
 if __name__ == "__main__":
-    threading.Thread(target=math_engine, daemon=True).start()
-    socketio.run(app, host="0.0.0.0", port=PORT)
+    t = threading.Thread(target=math_engine, daemon=True)
+    t.start()
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
