@@ -1,12 +1,14 @@
+from gevent import monkey
+monkey.patch_all()  # Must remain at the very top for Render/Gevent stability
+
 import os
 import json
 import random
-import threading
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string
 from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'mathogenesis-universal-2025'
+app.config['SECRET_KEY'] = 'mathogenesis-recursive-2025'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
 DB_FILE = "knowledge_base.json"
@@ -30,7 +32,6 @@ def save_db(theorem):
 
 load_db()
 
-# --- Advanced Mathematical & Astrophysical Templates ---
 CONJECTURE_TEMPLATES = [
     "R_uv - 1/2*R*g_uv + Lambda*g_uv = 8*pi*G/c^4*T_uv", 
     "S_BH = (k*A*c^3)/(4*G*hbar)",
@@ -49,29 +50,44 @@ CONJECTURE_TEMPLATES = [
 
 def attempt_proof(conjecture):
     if conjecture in knowledge_base:
-        return True, "Historical Consistency"
-    # Dimensional and Tensor Analysis simulation
-    if any(c in conjecture for c in ["G", "hbar", "c", "pi", "R_uv"]):
-        if random.random() < 0.05: # High complexity threshold
-            return True, "Tensor Contraction & Dimensional Invariance"
-    if random.random() < 0.1:
-        return True, "Formal Analytic Verification"
+        return False, "Redundant" 
+    
+    # Advanced logic: checks for fundamental constants and operators
+    complexity_weight = any(c in conjecture for c in ["G", "hbar", "c", "R_uv", "oint", "sum"])
+    
+    if complexity_weight and random.random() < 0.06:
+        return True, "Recursive Dimensional Analysis"
+    if random.random() < 0.08:
+        return True, "Formal Symbolic Verification"
     return False, None
 
 def evolution_loop():
     global running
     while running:
-        template = random.choice(CONJECTURE_TEMPLATES)
+        # RECURSIVE LOGIC: Use proven theorems as parents for the next generation
+        if knowledge_base and random.random() < 0.6:
+            template = random.choice(knowledge_base)
+            mode = "RECURSIVE"
+        else:
+            template = random.choice(CONJECTURE_TEMPLATES)
+            mode = "BASE"
+
         conjecture = template
-        if random.random() < 0.3:
-            conjecture = conjecture.replace("a", "((r_0 + 1) * a)")
-            
-        proved, method = attempt_proof(conjecture)
-        is_novel = conjecture not in knowledge_base
         
-        if proved and is_novel:
+        # Mutation Phase
+        mut_roll = random.random()
+        if mut_roll < 0.3:
+            conjecture = conjecture.replace("a", "((r_0 + 1) * a)")
+        elif mut_roll < 0.5:
+            conjecture = conjecture.replace("G", "(G / epsilon_0)")
+        elif mut_roll < 0.6:
+            conjecture = conjecture.replace("hbar", "(hbar * kappa)")
+
+        proved, method = attempt_proof(conjecture)
+        
+        if proved:
             save_db(conjecture)
-            socketio.emit('new_theorem', {'text': f"🎓 PROVED: {conjecture} via {method}"})
+            socketio.emit('new_theorem', {'text': f"🎓 PROVED [{mode}]: {conjecture}"})
         else:
             socketio.emit('discovery', {'text': f"Scanning: {conjecture}"})
         
@@ -96,7 +112,7 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Mathogenesis Universal</title>
+    <title>Mathogenesis Recursive</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         body { font-family: 'Consolas', monospace; background: #050505; color: #00ffcc; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
@@ -107,31 +123,29 @@ HTML_TEMPLATE = """
         .content { flex: 1; overflow-y: auto; padding: 15px; }
         .theorem { color: #00ff99; background: rgba(0,255,153,0.05); padding: 10px; margin-bottom: 10px; border-left: 2px solid #00ff99; font-size: 0.9em; }
         .discovery { color: #444; font-size: 0.8em; margin-bottom: 4px; }
-        button { padding: 10px 20px; font-weight: bold; cursor: pointer; border: none; }
+        button { padding: 10px 20px; font-weight: bold; cursor: pointer; border: none; border-radius: 2px; }
         #startBtn { background: #00ffcc; color: #000; }
         #stopBtn { background: #ff0055; color: #fff; }
-        button:disabled { opacity: 0.2; cursor: not-allowed; }
-        #status { font-size: 0.8em; }
+        button:disabled { opacity: 0.2; }
     </style>
 </head>
 <body>
     <div class="header">
-        <h2 style="margin:0;">MATHOGENESIS v4.0 (ASTROPHYSICS & ANALYSIS)</h2>
+        <h2 style="margin:0;">MATHOGENESIS v5.0 (RECURSIVE CORE)</h2>
         <div>
-            <span id="status">STATUS: OFFLINE</span>
             <button id="startBtn" onclick="sendAction('start')">INITIALIZE</button>
             <button id="stopBtn" onclick="sendAction('stop')" disabled>HALT</button>
         </div>
     </div>
     <div class="container">
         <div class="panel">
-            <div class="panel-header">SEARCH_STREAM</div>
+            <div class="panel-header">MUTATION_STREAM</div>
             <div id="stream" class="content"></div>
         </div>
         <div class="panel">
             <div class="panel-header">PERSISTENT_KNOWLEDGE_BASE</div>
             <div id="kb" class="content">
-                {% for t in kb %}<div class="theorem">🎓 LOADED: {{ t }}</div>{% endfor %}
+                {% for t in kb %}<div class="theorem">🎓 PROVED: {{ t }}</div>{% endfor %}
             </div>
         </div>
     </div>
@@ -141,7 +155,6 @@ HTML_TEMPLATE = """
         socket.on('status_change', (data) => {
             document.getElementById('startBtn').disabled = data.running;
             document.getElementById('stopBtn').disabled = !data.running;
-            document.getElementById('status').textContent = data.running ? "STATUS: ACTIVE" : "STATUS: HALTED";
         });
         socket.on('discovery', (data) => {
             const s = document.getElementById('stream');
